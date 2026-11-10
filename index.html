@@ -70,6 +70,19 @@ section{display:grid;gap:14px}
 .chip.hasev{border-left-width:5px;border-right:5px solid var(--ev);background:linear-gradient(90deg,color-mix(in srgb,var(--c) 28%,var(--bg)) 50%,color-mix(in srgb,var(--ev) 28%,var(--bg)) 50%)}
 .task.hasev{background:linear-gradient(90deg,color-mix(in srgb,var(--c) 16%,var(--surface)) 50%,color-mix(in srgb,var(--ev) 16%,var(--surface)) 50%);border-radius:6px;padding-inline:8px;border-left:5px solid var(--c);border-right:5px solid var(--ev);margin-top:4px}
 .task.hasev .evtag{color:var(--ev)}
+.day,.aday{cursor:pointer}
+.day:hover{box-shadow:inset 0 0 0 1px var(--muted)}
+.day.sel,.aday.sel{box-shadow:inset 0 0 0 2px var(--fg)}
+.daypanel{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:14px 16px;display:grid;gap:12px}
+.dpitem{display:grid;gap:4px;padding-top:12px;border-top:1px solid var(--line);min-width:0}
+.dptag{font-size:11px;text-transform:uppercase;letter-spacing:.08em;font-weight:700}
+.dptitle{font-size:15px;font-weight:600;overflow-wrap:anywhere}
+.links{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
+.lwrap{display:inline-flex;align-items:center}
+.lpill{font-size:12px;border:1px solid var(--line);border-radius:999px;padding:2px 10px;color:var(--fg);text-decoration:none;background:var(--bg);white-space:nowrap}
+.lpill:hover{border-color:var(--accent);color:var(--accent)}
+.lx{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px;padding:0 4px}
+.lmark{color:var(--accent);font-weight:700}
 .chip .sicon{font-weight:700;text-decoration:none;display:inline-block}
 .chip.doing .sicon{color:var(--warn)}
 .chip.done .sicon{color:var(--ok)}
@@ -157,6 +170,8 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
     <div class="legend" id="legend"></div>
     <div class="grid" id="grid"></div>
     <div class="agenda" id="agenda"></div>
+    <p class="help" id="dayHint">Tap any day to see its details and links (minutes, slides, attendance).</p>
+    <div class="daypanel" id="dayPanel" hidden></div>
   </section>
 
   <section>
@@ -199,6 +214,7 @@ const OLD_COLORS={red:"coral",blue:"sky",green:"lime",orange:"gold",purple:"lave
 const evKey=k=>EV_COLORS[k]?k:(OLD_COLORS[k]||"sky");
 const evColor=e=>EV_COLORS[evKey(e&&e.color)][1];
 const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===evKey(sel)?" selected":""}>${n}</option>`).join("");
+let selDay=null;
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
 function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
@@ -238,9 +254,12 @@ async function load(){
   try{
     const r=await fetch(API_URL,{cache:"no-store"}); const j=await r.json();
     if(busy)return;
-    tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due)}));
-    events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime)}));
-    loaded=true; renderAll();
+    tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due),links:parseLinks(t.links)}));
+    events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime),links:parseLinks(e.links)}));
+    loaded=true;
+    const a=document.activeElement;
+    if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.value){renderStats();return}
+    renderAll();
     if($("notice").dataset.kind==="net")note("");
   }catch(e){loaded=true;renderAll();note("Couldn't reach the board's Google Sheet. Check your connection; it will retry automatically.","net")}
 }
@@ -303,6 +322,7 @@ function renderEvents(){
       <span class="name">${esc(e.name)}</span>
       <span class="when">${when}${e.time?" · "+timeRange(e):""}</span>
       ${e.note?`<span class="muted" style="font-size:13px">${esc(e.note)}</span>`:""}
+      ${(e.links||[]).length?`<div class="links">${linkPills(e,"Events",false)}</div>`:""}
       <div class="row">${tc.length?`<span>${dn}/${tc.length} tasks done</span>`:""}
         ${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open event page ↗</a>`:""}
         <button class="fbtn" data-evpick="${esc(e.id)}">Show tasks</button>
@@ -317,7 +337,7 @@ function visibleTasks(){return evFilter==="all"?tasks:tasks.filter(t=>(t.event||
 function chip(t){
   const ev=evById(t.event);
   const s=ST[t.status]?t.status:"todo";
-  return `<div class="chip ${s}${t.kind==="meeting"?" meet":""}${ev?" hasev":""}" style="--c:var(${off(t.office).c})${ev?";--ev:"+evColor(ev):""}" title="${esc(ST[s])} · ${esc(off(t.office).name)}${ev?" · "+esc(ev.name):""}"><span class="sicon" aria-label="${ST[s]}">${ICON[s]}</span> ${esc(t.title)}</div>`;
+  return `<div class="chip ${s}${t.kind==="meeting"?" meet":""}${ev?" hasev":""}" style="--c:var(${off(t.office).c})${ev?";--ev:"+evColor(ev):""}" title="${esc(ST[s])} · ${esc(off(t.office).name)}${ev?" · "+esc(ev.name):""}"><span class="sicon" aria-label="${ST[s]}">${ICON[s]}</span> ${esc(t.title)}${(t.links||[]).length?` <span class="lmark" title="Has links">↗</span>`:""}</div>`;
 }
 function renderCalendar(){
   const first=new Date(viewY,viewM,1), last=new Date(viewY,viewM+1,0);
@@ -332,9 +352,10 @@ function renderCalendar(){
     const out=d.getMonth()!==viewM, labels=dayLabels(k), items=(m[k]||[]).sort((a,b)=>(b.kind==="meeting")-(a.kind==="meeting"));
     const evStyle=labels.length?` style="--ec:${labels[0].color}"`:"";
     const lab=labels.map(l=>`<span class="evlabel" style="--ec:${l.color}">${esc(l.text)}</span>`).join("");
-    html+=`<div class="day${out?" out":""}${k===todayISO?" today":""}${labels.length&&!out?" event":""}"${out?"":evStyle}><span class="d">${d.getDate()}</span>`+
+    const sel=k===selDay?" sel":"";
+    html+=`<div class="day${out?" out":""}${k===todayISO?" today":""}${labels.length&&!out?" event":""}${sel}" data-day="${k}"${out?"":evStyle}><span class="d">${d.getDate()}</span>`+
       (out?"":lab+items.map(chip).join(""))+`</div>`;
-    if(!out&&(labels.length||items.length))agenda+=`<div class="aday${labels.length?" event":""}"${evStyle}><div class="date">${fmt(k)}${k===todayISO?" · Today":""}</div>`+
+    if(!out&&(labels.length||items.length))agenda+=`<div class="aday${labels.length?" event":""}${sel}" data-day="${k}"${evStyle}><div class="date">${fmt(k)}${k===todayISO?" · Today":""}</div>`+
       lab+items.map(chip).join("")+`</div>`;
   }
   $("grid").innerHTML=html;
@@ -363,6 +384,7 @@ function renderOffices(){
       <div>${list.map(t=>{const ev=evById(t.event);const s=ST[t.status]?t.status:"todo";return `<div class="task${ev?" hasev":""}"${ev?` style="--ev:${evColor(ev)}"`:""}>
         <select class="st ${s}" id="st-${esc(t.id)}" data-id="${esc(t.id)}" ${w?"":"disabled"} aria-label="Status">${Object.keys(ST).map(k=>`<option value="${k}"${k===s?" selected":""}>${ICON[k]} ${ST[k]}</option>`).join("")}</select>
         <span class="ttitle${s==="done"?" done":""}">${t.kind==="meeting"?"📅 ":""}${esc(t.title)}<br><span class="evtag">${ev?esc(ev.name):"General"}</span></span>
+        ${(t.links||[]).length?`<div class="links" style="grid-column:2">${linkPills(t,"Tasks",false)}</div>`:""}
         ${t.details?`<details class="det"><summary>How to do it</summary><ul>${String(t.details).split("\n").filter(Boolean).map(l=>`<li>${esc(l)}</li>`).join("")}</ul></details>`:""}
         <div class="meta"><span class="${late(t)?"late":""}">${t.due?(late(t)?"Overdue · ":"Due ")+fmt(t.due):"No date"}</span>
           <input class="owner" id="owner-${esc(t.id)}" data-id="${esc(t.id)}" value="${esc(t.owner)}" placeholder="${w?"Assign owner":"No owner"}" aria-label="Owner" ${w?"":"disabled"}>
@@ -372,7 +394,38 @@ function renderOffices(){
       ${w?`<form class="add" data-office="${o.k}"><input type="text" id="add-t-${o.k}" placeholder="New task" aria-label="New task" required><input type="date" id="add-d-${o.k}" aria-label="Due date" value="${todayISO}"><select id="add-e-${o.k}" aria-label="Event">${evOptions(evFilter)}</select><select id="add-k-${o.k}" aria-label="Type"><option value="task">Task</option><option value="meeting">Meeting</option></select><button>Add</button></form>`:""}
     </div>`}).join("");
 }
-function renderAll(){renderStats();renderEvents();renderCalendar();renderFilters();renderOffices()}
+const LINK_TYPES=["Minutes","Slides","Attendance","Photos","Document","Other"];
+function parseLinks(v){
+  let a=v; if(!Array.isArray(a)){try{a=JSON.parse(v||"[]")}catch(e){a=[]}}
+  return Array.isArray(a)?a.filter(l=>l&&safeUrl(l.url)):[];
+}
+function linkPills(item,kind,editable){
+  return (item.links||[]).map((l,i)=>`<span class="lwrap"><a class="lpill" href="${esc(safeUrl(l.url))}" target="_blank" rel="noopener">${esc(l.label||"Link")} ↗</a>${editable?`<button class="lx" data-lrm="${kind}|${esc(item.id)}|${i}" aria-label="Remove ${esc(l.label||"link")}">×</button>`:""}</span>`).join("");
+}
+function linkBlock(kind,item){
+  const w=canWrite(), pills=linkPills(item,kind,w), fid=kind+"-"+item.id;
+  return `<div class="links">${pills||`<span class="muted" style="font-size:12.5px">No links yet</span>`}</div>`+
+    (w?`<form class="add addlink" data-lk="${kind}|${esc(item.id)}"><select id="lk-l-${esc(fid)}" aria-label="Link type">${LINK_TYPES.map(x=>`<option>${x}</option>`).join("")}</select><input type="url" id="lk-u-${esc(fid)}" placeholder="https://docs.google.com/…" aria-label="Link address" required><button>Add link</button></form>`:"");
+}
+function renderDayPanel(){
+  const p=$("dayPanel"); $("dayHint").hidden=!!selDay;
+  if(!selDay){p.hidden=true;p.innerHTML="";return}
+  const evs=events.filter(e=>e.start&&selDay>=e.start&&selDay<=(e.end||e.start));
+  const ts=visibleTasks().filter(t=>t.due===selDay).sort((a,b)=>(b.kind==="meeting")-(a.kind==="meeting"));
+  p.hidden=false;
+  p.innerHTML=`<div class="ohead"><h3>${esc(parse(selDay).toLocaleDateString("en-US",{weekday:"long",month:"long",day:"numeric",year:"numeric"}))}</h3><button class="navbtn" id="dpClose">Close</button></div>`+
+    (evs.length||ts.length?"":`<div class="muted" style="font-size:14px">Nothing on this day.${canWrite()?" To add something, create a task under an office below with this due date.":""}</div>`)+
+    evs.map(e=>`<div class="dpitem"><span class="dptag" style="color:${evColor(e)}">Event${e.kind?" · "+esc(e.kind):""}</span><span class="dptitle">${esc(e.name)}</span><span class="muted" style="font-size:13px">${timeRange(e)||"All day"}${e.note?" · "+esc(e.note):""}</span>${linkBlock("Events",e)}</div>`).join("")+
+    ts.map(t=>{const ev=evById(t.event),s=ST[t.status]?t.status:"todo";
+      return `<div class="dpitem"><span class="dptag" style="color:var(${off(t.office).c})">${esc(off(t.office).name)}${t.kind==="meeting"?" · Meeting":""}</span><span class="dptitle">${ICON[s]} ${esc(t.title)}</span><span class="muted" style="font-size:13px">${ST[s]}${t.owner?" · "+esc(t.owner):""}${ev?" · "+esc(ev.name):""}</span>${linkBlock("Tasks",t)}</div>`}).join("");
+}
+function confirmTap(b,label){
+  if(b.dataset.confirm==="1")return true;
+  const old=b.textContent; b.dataset.confirm="1"; b.textContent=label; b.style.color="var(--bad)";
+  setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent=old;b.style.color=""}},4000);
+  return false;
+}
+function renderAll(){renderStats();renderEvents();renderCalendar();renderFilters();renderOffices();renderDayPanel()}
 
 $("prev").onclick=()=>{viewM--;if(viewM<0){viewM=11;viewY--}renderCalendar()};
 $("next").onclick=()=>{viewM++;if(viewM>11){viewM=0;viewY++}renderCalendar()};
@@ -381,6 +434,17 @@ $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffice
 document.addEventListener("click",e=>{
   if(e.target.id==="unlockBtn"){unlock();return}
   if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
+  if(e.target.id==="dpClose"){selDay=null;renderCalendar();renderDayPanel();return}
+  const lr=e.target.closest("[data-lrm]");
+  if(lr&&canWrite()){
+    if(!confirmTap(lr,"Remove?"))return;
+    const [sheet,id,idx]=lr.dataset.lrm.split("|");
+    const item=(sheet==="Events"?events:tasks).find(x=>x.id===id); if(!item)return;
+    item.links=(item.links||[]).filter((_,i)=>i!==+idx); renderAll();
+    api({action:"update",sheet,id,data:{links:JSON.stringify(item.links)}}); return;
+  }
+  const dc=e.target.closest("[data-day]");
+  if(dc&&!e.target.closest("a")){selDay=dc.dataset.day===selDay?null:dc.dataset.day;renderCalendar();renderDayPanel();if(selDay)$("dayPanel").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;renderFilters();renderOffices();return}
   const p=e.target.closest("[data-evpick]"); if(p){evFilter=p.dataset.evpick;const ev=evById(evFilter);if(ev&&ev.start){const d=parse(ev.start);viewY=d.getFullYear();viewM=d.getMonth()}renderAll();$("offices").scrollIntoView({behavior:"smooth"});return}
   const ed=e.target.closest("[data-evdel]"); if(ed&&canWrite()){
@@ -406,6 +470,14 @@ document.addEventListener("change",e=>{
 });
 document.addEventListener("submit",e=>{
   e.preventDefault(); if(!canWrite())return;
+  if(e.target.matches("form.addlink")){
+    const [sheet,id]=e.target.dataset.lk.split("|"), fid=sheet+"-"+id;
+    const url=$("lk-u-"+fid).value.trim(), label=$("lk-l-"+fid).value;
+    if(!safeUrl(url)){note("Links must start with https://");return}
+    const item=(sheet==="Events"?events:tasks).find(x=>x.id===id); if(!item)return;
+    item.links=[...(item.links||[]),{label,url}]; note(""); renderAll();
+    api({action:"update",sheet,id,data:{links:JSON.stringify(item.links)}}); return;
+  }
   if(e.target.id==="addEvent"){
     const name=$("ev-name").value.trim(); if(!name)return;
     const start=$("ev-start").value, end=$("ev-end").value||start;
