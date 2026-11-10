@@ -88,6 +88,10 @@ section{display:grid;gap:14px}
 .eerow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
 .eerow>div{display:grid;gap:2px;min-width:0}
 .evedit .row{margin-top:4px}
+.task.tedit{grid-template-columns:minmax(0,1fr);gap:4px;background:var(--bg);border-radius:8px;padding:10px;margin-block:6px;border-top:0}
+.tedit label{font-size:12px}
+.tedit input,.tedit select,.tedit textarea{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--surface);color:var(--fg);width:100%;min-width:0}
+select.owner{border-style:solid;padding:2px 6px;width:auto;max-width:180px}
 .chip .sicon{font-weight:700;text-decoration:none;display:inline-block}
 .chip.doing .sicon{color:var(--warn)}
 .chip.done .sicon{color:var(--ok)}
@@ -219,7 +223,7 @@ const OLD_COLORS={red:"coral",blue:"sky",green:"lime",orange:"gold",purple:"lave
 const evKey=k=>EV_COLORS[k]?k:(OLD_COLORS[k]||"sky");
 const evColor=e=>EV_COLORS[evKey(e&&e.color)][1];
 const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===evKey(sel)?" selected":""}>${n}</option>`).join("");
-let selDay=null, editEv=null;
+let selDay=null, editEv=null, editTask=null, officers=[];
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
 function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
@@ -261,9 +265,10 @@ async function load(){
     if(busy)return;
     tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due),links:parseLinks(t.links)}));
     events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime),links:parseLinks(e.links)}));
+    officers=Array.isArray(j.officers)?j.officers.map(String):[];
     loaded=true;
     const a=document.activeElement;
-    if(editEv||(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.value)){renderStats();return}
+    if(editEv||editTask||(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.value)){renderStats();return}
     renderAll();
     if($("notice").dataset.kind==="net")note("");
   }catch(e){loaded=true;renderAll();note("Couldn't reach the board's Google Sheet. Check your connection; it will retry automatically.","net")}
@@ -383,7 +388,9 @@ function renderCalendar(){
   $("agenda").innerHTML=agenda||`<div class="empty">Nothing scheduled this month.</div>`;
 }
 function renderFilters(){
+  if(filter==="mine"&&!canWrite())filter="all";
   const opts=[["all","All"],["open","Not done"],["late","Overdue"]];
+  if(canWrite())opts.unshift(["mine","My tasks"]);
   $("filters").innerHTML=opts.map(([k,l])=>`<button class="fbtn" data-f="${k}" aria-pressed="${filter===k}">${l}</button>`).join("");
   const ops=[["all","All events"],["general","General (org-wide)"],...[...events].sort((a,b)=>(a.start||"9").localeCompare(b.start||"9")).map(e=>[e.id,e.name])];
   $("evFilter").innerHTML=ops.map(([v,l])=>`<option value="${esc(v)}"${v===evFilter?" selected":""}>${esc(l)}</option>`).join("");
@@ -399,21 +406,38 @@ function renderOffices(){
     const total=list.length, done=list.filter(t=>t.status==="done").length;
     if(filter==="open")list=list.filter(t=>t.status!=="done");
     if(filter==="late")list=list.filter(late);
+    if(filter==="mine")list=list.filter(t=>t.owner&&t.owner===who);
     return `<div class="office" style="--c:var(${o.c})">
       <div class="ohead"><h3>${o.name}</h3><span class="muted" style="font-size:13px">${done}/${total} done</span></div>
       <div class="bar"><i style="width:${total?Math.round(done/total*100):0}%"></i></div>
-      <div>${list.map(t=>{const ev=evById(t.event);const s=ST[t.status]?t.status:"todo";return `<div class="task${ev?" hasev":""}"${ev?` style="--ev:${evColor(ev)}"`:""}>
+      <div>${list.map(t=>{if(w&&editTask===t.id)return taskEditForm(t);const ev=evById(t.event);const s=ST[t.status]?t.status:"todo";return `<div class="task${ev?" hasev":""}"${ev?` style="--ev:${evColor(ev)}"`:""}>
         <select class="st ${s}" id="st-${esc(t.id)}" data-id="${esc(t.id)}" ${w?"":"disabled"} aria-label="Status">${Object.keys(ST).map(k=>`<option value="${k}"${k===s?" selected":""}>${ICON[k]} ${ST[k]}</option>`).join("")}</select>
         <span class="ttitle${s==="done"?" done":""}">${t.kind==="meeting"?"📅 ":""}${esc(t.title)}<br><span class="evtag">${ev?esc(ev.name):"General"}</span></span>
         ${(t.links||[]).length?`<div class="links" style="grid-column:2">${linkPills(t,"Tasks",false)}</div>`:""}
         ${t.details?`<details class="det"><summary>How to do it</summary><ul>${String(t.details).split("\n").filter(Boolean).map(l=>`<li>${esc(l)}</li>`).join("")}</ul></details>`:""}
         <div class="meta"><span class="${late(t)?"late":""}">${t.due?(late(t)?"Overdue · ":"Due ")+fmt(t.due):"No date"}</span>
-          <input class="owner" id="owner-${esc(t.id)}" data-id="${esc(t.id)}" value="${esc(t.owner)}" placeholder="${w?"Assign owner":"No owner"}" aria-label="Owner" ${w?"":"disabled"}>
-          ${w?`<button class="del" data-id="${esc(t.id)}" data-act="del">Remove</button>`:""}
+          ${w?ownerSelect(t):`<span>${t.owner?"Owner: "+esc(t.owner):"No owner"}</span>`}
+          ${w?`<button class="del" data-tedit="${esc(t.id)}" style="text-decoration:underline">Edit</button><button class="del" data-id="${esc(t.id)}" data-act="del">Remove</button>`:""}
           ${t.updatedBy?`<span title="Last change">Edited by ${esc(t.updatedBy)}${t.updatedAt?" · "+esc(t.updatedAt.slice(5)):""}</span>`:""}</div>
       </div>`}).join("")||`<div class="muted" style="font-size:13px">Nothing here.</div>`}</div>
       ${w?`<form class="add" data-office="${o.k}"><input type="text" id="add-t-${o.k}" placeholder="New task" aria-label="New task" required><input type="date" id="add-d-${o.k}" aria-label="Due date" value="${todayISO}"><select id="add-e-${o.k}" aria-label="Event">${evOptions(evFilter)}</select><select id="add-k-${o.k}" aria-label="Type"><option value="task">Task</option><option value="meeting">Meeting</option></select><button>Add</button></form>`:""}
     </div>`}).join("");
+}
+function ownerSelect(t){
+  const names=[...officers]; if(t.owner&&!names.includes(t.owner))names.unshift(t.owner);
+  return `<select class="owner" id="owner-${esc(t.id)}" data-id="${esc(t.id)}" aria-label="Owner"><option value="">No owner</option>${names.map(n=>`<option value="${esc(n)}"${n===t.owner?" selected":""}>${esc(n)}</option>`).join("")}</select>`;
+}
+function taskEditForm(t){
+  const f=k=>`te-${k}-${esc(t.id)}`;
+  return `<form class="task tedit" data-id="${esc(t.id)}">
+    <label class="muted" for="${f("title")}">Task</label><input id="${f("title")}" type="text" value="${esc(t.title)}" required>
+    <div class="eerow"><div><label class="muted" for="${f("office")}">Office</label><select id="${f("office")}">${OFFICES.map(o=>`<option value="${o.k}"${o.k===t.office?" selected":""}>${esc(o.name.replace("Office of the ",""))}</option>`).join("")}</select></div>
+      <div><label class="muted" for="${f("due")}">Due date</label><input id="${f("due")}" type="date" value="${esc(t.due)}"></div></div>
+    <div class="eerow"><div><label class="muted" for="${f("event")}">Event</label><select id="${f("event")}">${evOptions(t.event||"general")}</select></div>
+      <div><label class="muted" for="${f("kind")}">Type</label><select id="${f("kind")}"><option value="task"${t.kind!=="meeting"?" selected":""}>Task</option><option value="meeting"${t.kind==="meeting"?" selected":""}>Meeting</option></select></div></div>
+    <label class="muted" for="${f("details")}">Steps or notes (one per line)</label><textarea id="${f("details")}" rows="3">${esc(t.details)}</textarea>
+    <div class="row" style="display:flex;gap:8px"><button class="btn">Save</button><button type="button" class="navbtn" data-tcancel="1">Cancel</button></div>
+  </form>`;
 }
 const LINK_TYPES=["Minutes","Slides","Attendance","Photos","Document","Other"];
 function parseLinks(v){
@@ -455,6 +479,8 @@ $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffice
 document.addEventListener("click",e=>{
   if(e.target.id==="unlockBtn"){unlock();return}
   if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
+  const tb=e.target.closest("[data-tedit]"); if(tb&&canWrite()){editTask=tb.dataset.tedit;renderOffices();const n=document.getElementById("te-title-"+editTask);n&&n.focus();return}
+  if(e.target.closest("[data-tcancel]")){editTask=null;renderOffices();return}
   const eb=e.target.closest("[data-evedit]"); if(eb&&canWrite()){editEv=eb.dataset.evedit;renderEvents();const n=document.getElementById("ee-name-"+editEv);n&&n.focus();return}
   if(e.target.closest("[data-evcancel]")){editEv=null;renderEvents();return}
   if(e.target.id==="dpClose"){selDay=null;renderCalendar();renderDayPanel();return}
@@ -486,13 +512,22 @@ document.addEventListener("change",e=>{
   if(sel){const t=tasks.find(x=>x.id===sel.dataset.id);if(!t||t.status===sel.value)return;t.status=sel.value;renderAll();api({action:"update",sheet:"Tasks",id:t.id,data:{status:t.status}});return}
   const ec=e.target.closest("select.evcolor");
   if(ec){const ev=evById(ec.dataset.id);if(!ev)return;ev.color=ec.value;renderAll();api({action:"update",sheet:"Events",id:ev.id,data:{color:ev.color}});return}
-  const i=e.target.closest("input.owner"); if(!i)return;
+  const i=e.target.closest(".owner"); if(!i)return;
   const t=tasks.find(x=>x.id===i.dataset.id); const v=i.value.trim();
   if(!t||v===(t.owner||""))return;
   t.owner=v; api({action:"update",sheet:"Tasks",id:t.id,data:{owner:v}});
 });
 document.addEventListener("submit",e=>{
   e.preventDefault(); if(!canWrite())return;
+  if(e.target.matches("form.tedit")){
+    const id=e.target.dataset.id, t=tasks.find(x=>x.id===id); if(!t)return;
+    const g=k=>$("te-"+k+"-"+id).value;
+    const title=g("title").trim(); if(!title)return;
+    const ev=g("event");
+    const data={title,office:g("office"),due:g("due"),event:ev==="general"?"":ev,kind:g("kind"),details:g("details").trim()};
+    Object.assign(t,data); editTask=null; renderAll();
+    api({action:"update",sheet:"Tasks",id,data}); return;
+  }
   if(e.target.matches("form.evedit")){
     const id=e.target.dataset.id, ev=evById(id); if(!ev)return;
     const g=k=>$("ee-"+k+"-"+id).value.trim();
