@@ -159,7 +159,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
         <span id="filters" class="filters"></span>
       </div>
     </div>
-    <p class="help">Anyone can view this board. Officers enter the team code (top right) to edit: tap a status to move it from <b>To do</b> to <b>In progress</b> to <b>Done</b>, type a name to assign an owner, or add tasks at the bottom of each office.</p>
+    <p class="help">Anyone can view this board. Officers enter their own code (top right) to edit, and every change is signed with their name: tap a status to move it from <b>To do</b> to <b>In progress</b> to <b>Done</b>, type a name to assign an owner, or add tasks at the bottom of each office.</p>
     <div class="offices" id="offices"></div>
   </section>
 </div>
@@ -180,7 +180,8 @@ const OFFICES=[
 const ST={todo:"To do",doing:"In progress",done:"Done"};
 const NEXT={todo:"doing",doing:"done",done:"todo"};
 let tasks=[], events=[], filter="open", evFilter="all", loaded=false, busy=0;
-let code=""; try{code=localStorage.getItem("pylonCode")||""}catch(e){}
+let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
+function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
 const canWrite=()=>!!code;
 const now=new Date(); let viewY=now.getFullYear(), viewM=now.getMonth();
 const $=id=>document.getElementById(id);
@@ -211,7 +212,7 @@ async function api(body){
     const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({...body,code})});
     const j=await r.json();
     if(!j.ok){
-      if(j.error==="bad_code"){code="";try{localStorage.removeItem("pylonCode")}catch(e){}renderUnlock();renderAll();note("That team code is wrong. Ask your president for the current code.")}
+      if(j.error==="bad_code"){setCode("","");renderUnlock();renderAll();note("Your officer code no longer works. Ask your president for your code and unlock again.")}
       else note("That change didn't save. Try again.");
     }
   }catch(e){note("That change didn't save. Check your connection and try again.")}
@@ -229,8 +230,8 @@ function dayLabels(k){
 }
 function renderUnlock(){
   $("unlock").innerHTML=canWrite()
-    ?`<span class="muted">Editing on</span><button class="navbtn" id="lockBtn">Lock</button>`
-    :`<label for="codeIn" class="muted">Officer?</label><input id="codeIn" type="password" placeholder="Team code" autocomplete="off"><button class="btn" id="unlockBtn">Unlock editing</button>`;
+    ?`<span class="muted">Editing as <b style="color:var(--fg)">${esc(who||"officer")}</b></span><button class="navbtn" id="lockBtn">Lock</button>`
+    :`<label for="codeIn" class="muted">Officer?</label><input id="codeIn" type="password" placeholder="Your officer code" autocomplete="off"><button class="btn" id="unlockBtn">Unlock editing</button>`;
   $("addEvent").hidden=!canWrite();
 }
 function renderStats(){
@@ -323,7 +324,8 @@ function renderOffices(){
         ${t.details?`<details class="det"><summary>How to do it</summary><ul>${String(t.details).split("\n").filter(Boolean).map(l=>`<li>${esc(l)}</li>`).join("")}</ul></details>`:""}
         <div class="meta"><span class="${late(t)?"late":""}">${t.due?(late(t)?"Overdue · ":"Due ")+fmt(t.due):"No date"}</span>
           <input class="owner" id="owner-${esc(t.id)}" data-id="${esc(t.id)}" value="${esc(t.owner)}" placeholder="${w?"Assign owner":"No owner"}" aria-label="Owner" ${w?"":"disabled"}>
-          ${w?`<button class="del" data-id="${esc(t.id)}" data-act="del">Remove</button>`:""}</div>
+          ${w?`<button class="del" data-id="${esc(t.id)}" data-act="del">Remove</button>`:""}
+          ${t.updatedBy?`<span title="Last change">Edited by ${esc(t.updatedBy)}${t.updatedAt?" · "+esc(t.updatedAt.slice(5)):""}</span>`:""}</div>
       </div>`}).join("")||`<div class="muted" style="font-size:13px">Nothing here.</div>`}</div>
       ${w?`<form class="add" data-office="${o.k}"><input type="text" id="add-t-${o.k}" placeholder="New task" aria-label="New task" required><input type="date" id="add-d-${o.k}" aria-label="Due date" value="${todayISO}"><select id="add-e-${o.k}" aria-label="Event">${evOptions(evFilter)}</select><select id="add-k-${o.k}" aria-label="Type"><option value="task">Task</option><option value="meeting">Meeting</option></select><button>Add</button></form>`:""}
     </div>`}).join("");
@@ -335,8 +337,8 @@ $("next").onclick=()=>{viewM++;if(viewM>11){viewM=0;viewY++}renderCalendar()};
 $("todayBtn").onclick=()=>{viewY=now.getFullYear();viewM=now.getMonth();renderCalendar()};
 $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffices()};
 document.addEventListener("click",e=>{
-  if(e.target.id==="unlockBtn"){const v=$("codeIn").value.trim();if(!v)return;code=v;try{localStorage.setItem("pylonCode",v)}catch(x){}note("");renderUnlock();renderAll();return}
-  if(e.target.id==="lockBtn"){code="";try{localStorage.removeItem("pylonCode")}catch(x){}renderUnlock();renderAll();return}
+  if(e.target.id==="unlockBtn"){unlock();return}
+  if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;renderFilters();renderOffices();return}
   const p=e.target.closest("[data-evpick]"); if(p){evFilter=p.dataset.evpick;const ev=evById(evFilter);if(ev&&ev.start){const d=parse(ev.start);viewY=d.getFullYear();viewM=d.getMonth()}renderAll();$("offices").scrollIntoView({behavior:"smooth"});return}
   const ed=e.target.closest("[data-evdel]"); if(ed&&canWrite()){const id=ed.dataset.evdel;events=events.filter(x=>x.id!==id);renderAll();api({action:"delete",sheet:"Events",id});return}
@@ -367,6 +369,17 @@ document.addEventListener("submit",e=>{
   const rec={id:"t"+Date.now().toString(36),title,office:k,due:$("add-d-"+k).value||"",owner:"",status:"todo",event:ev==="general"?"":ev,kind:$("add-k-"+k).value};
   tasks.push(rec); renderAll(); ti.value=""; api({action:"add",sheet:"Tasks",data:rec});
 });
+async function unlock(){
+  const btn=$("unlockBtn"), v=$("codeIn").value.trim(); if(!v)return;
+  btn.disabled=true; btn.textContent="Checking…";
+  try{
+    const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({action:"whoami",code:v})});
+    const j=await r.json();
+    if(j.ok){setCode(v,j.who||"");note("");renderUnlock();renderAll();return}
+    note("That code isn't on the officer list. Check it with your president.");
+  }catch(x){note("Couldn't check your code. Check your connection and try again.")}
+  btn.disabled=false; btn.textContent="Unlock editing";
+}
 function note(msg,kind){$("notice").textContent=msg;$("notice").hidden=!msg;$("notice").dataset.kind=kind||""}
 
 renderLegend(); renderUnlock(); renderAll(); load();
