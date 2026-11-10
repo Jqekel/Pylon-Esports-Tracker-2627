@@ -46,7 +46,7 @@ section{display:grid;gap:14px}
 .legend span{display:inline-flex;align-items:center;gap:6px}
 .dot{width:9px;height:9px;border-radius:50%;background:var(--c);flex:none}
 .events{display:grid;grid-template-columns:repeat(auto-fill,minmax(min(100%,240px),1fr));gap:12px}
-.ev{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:12px 14px;display:grid;gap:4px;min-width:0}
+.ev{background:var(--surface);border:1px solid var(--line);border-left:5px solid var(--ec,var(--accent));border-radius:10px;padding:12px 14px;display:grid;gap:4px;min-width:0}
 .ev .when{font-size:13px;color:var(--muted)}
 .ev .name{font-family:var(--display);font-weight:700;font-size:16px;overflow-wrap:anywhere}
 .ev .row{display:flex;flex-wrap:wrap;gap:4px 12px;font-size:13px;align-items:center}
@@ -62,14 +62,17 @@ section{display:grid;gap:14px}
 .day.out{background:var(--bg)}
 .day .d{font-size:12px;font-variant-numeric:tabular-nums;color:var(--muted)}
 .day.today .d{color:#fff;background:var(--accent);border-radius:4px;padding:0 5px;align-self:flex-start;font-weight:600}
-.day.event{background:var(--accent-soft)}
-.evlabel{font-family:var(--display);font-weight:700;font-size:11.5px;color:var(--accent);line-height:1.2;overflow-wrap:anywhere}
+.day.event{background:var(--accent-soft);background:color-mix(in srgb,var(--ec,var(--accent)) 14%,var(--surface))}
+.evlabel{font-family:var(--display);font-weight:700;font-size:11.5px;color:var(--ec,var(--accent));line-height:1.2;overflow-wrap:anywhere}
 .chip{font-size:11.5px;line-height:1.3;padding:2px 5px;border-radius:4px;border-left:3px solid var(--c);background:var(--bg);overflow-wrap:anywhere}
 .chip.meet{border-left-style:double;border-left-width:4px;font-weight:600}
 .chip.done{text-decoration:line-through;color:var(--muted)}
+.chip .sicon{font-weight:700;text-decoration:none;display:inline-block}
+.chip.doing .sicon{color:var(--warn)}
+.chip.done .sicon{color:var(--ok)}
 .agenda{display:none;gap:10px}
 .aday{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:10px 12px;display:grid;gap:6px}
-.aday.event{border-color:var(--accent)}
+.aday.event{border-color:var(--ec,var(--accent))}
 .aday .date{font-family:var(--display);font-weight:700;font-size:14px}
 @media (max-width:720px){.grid{display:none}.agenda{display:grid}}
 .filters{display:flex;flex-wrap:wrap;gap:6px;align-items:center}
@@ -130,7 +133,10 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
       <input type="text" id="ev-name" placeholder="New event name" aria-label="Event name" required>
       <input type="text" id="ev-kind" placeholder="Type (e.g. Tournament)" aria-label="Event type" style="flex:0 1 170px">
       <input type="date" id="ev-start" aria-label="Start date">
+      <input type="time" id="ev-time" aria-label="Start time (optional)" title="Start time (optional)">
       <input type="date" id="ev-end" aria-label="End date">
+      <input type="time" id="ev-endtime" aria-label="End time (optional)" title="End time (optional)">
+      <select id="ev-color" aria-label="Event color"></select>
       <button>Add event</button>
     </form>
   </section>
@@ -159,7 +165,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
         <span id="filters" class="filters"></span>
       </div>
     </div>
-    <p class="help">Anyone can view this board. Officers enter their own code (top right) to edit, and every change is signed with their name: tap a status to move it from <b>To do</b> to <b>In progress</b> to <b>Done</b>, type a name to assign an owner, or add tasks at the bottom of each office.</p>
+    <p class="help">Anyone can view this board. Officers enter their own code (top right) to edit, and every change is signed with their name: pick a status from the dropdown (<b>To do</b>, <b>In progress</b>, <b>Done</b>), type a name to assign an owner, or add tasks at the bottom of each office.</p>
     <div class="offices" id="offices"></div>
   </section>
 </div>
@@ -178,8 +184,11 @@ const OFFICES=[
   {k:"esp",name:"Esports",c:"--o-esp"}
 ];
 const ST={todo:"To do",doing:"In progress",done:"Done"};
-const NEXT={todo:"doing",doing:"done",done:"todo"};
-let tasks=[], events=[], filter="open", evFilter="all", loaded=false, busy=0;
+const ICON={todo:"○",doing:"◐",done:"✓"};
+const EV_COLORS={red:["Red","#c8102e"],blue:["Blue","#2b6fd6"],green:["Green","#2f8f55"],orange:["Orange","#d0661c"],purple:["Purple","#7a52c7"],teal:["Teal","#12898f"],pink:["Pink","#c2337f"],gold:["Gold","#b88a00"]};
+const evColor=e=>(EV_COLORS[e&&e.color]||EV_COLORS.red)[1];
+const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===(sel||"red")?" selected":""}>${n}</option>`).join("");
+let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
 function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
 const canWrite=()=>!!code;
@@ -190,6 +199,15 @@ const pad=n=>String(n).padStart(2,"0");
 const iso=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
 const todayISO=iso(now);
 // Accepts 2026-11-13, 11/13/2026 or a full date string typed into the Sheet; returns 2026-11-13 or "".
+// Accepts 14:30, 2:30 PM or 2:30pm; returns 14:30 or "".
+function normTime(s){
+  const m=String(s||"").trim().match(/^(\d{1,2}):(\d{2})(?::\d{2})?\s*([ap]\.?m\.?)?$/i); if(!m)return "";
+  let h=+m[1]; const ap=(m[3]||"").toLowerCase();
+  if(ap.startsWith("p")&&h<12)h+=12; if(ap.startsWith("a")&&h===12)h=0;
+  return h<24?pad(h)+":"+m[2]:"";
+}
+function fmtTime(t){if(!t)return "";const [h,m]=t.split(":").map(Number);return (h%12||12)+":"+pad(m)+" "+(h<12?"AM":"PM")}
+function timeRange(e){return e.time?fmtTime(e.time)+(e.endTime?" – "+fmtTime(e.endTime):""):""}
 function normDate(s){
   s=String(s||"").trim(); if(!s)return "";
   if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
@@ -210,7 +228,7 @@ async function load(){
     const r=await fetch(API_URL,{cache:"no-store"}); const j=await r.json();
     if(busy)return;
     tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due)}));
-    events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end)}));
+    events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime)}));
     loaded=true; renderAll();
     if($("notice").dataset.kind==="net")note("");
   }catch(e){loaded=true;renderAll();note("Couldn't reach the board's Google Sheet. Check your connection; it will retry automatically.","net")}
@@ -233,7 +251,8 @@ function dayLabels(k){
   events.forEach(e=>{
     if(!e.start||k<e.start||k>(e.end||e.start))return;
     const label=(e.days&&e.days[k])||"";
-    out.push(e.name+(label?" · "+label:""));
+    const t=k===e.start&&e.time?fmtTime(e.time)+" ":"";
+    out.push({text:t+e.name+(label?" · "+label:""),color:evColor(e)});
   });
   return out;
 }
@@ -268,25 +287,26 @@ function renderEvents(){
     const when=e.start?(e.end&&e.end!==e.start?fmtShort(e.start)+" – "+fmtShort(e.end)+", "+e.end.slice(0,4):fmt(e.start)+", "+e.start.slice(0,4)):"Date to be decided";
     const tc=tasks.filter(t=>t.event===e.id), dn=tc.filter(t=>t.status==="done").length;
     const link=safeUrl(e.link);
-    return `<div class="ev${past?" past":""}">
+    return `<div class="ev${past?" past":""}" style="--ec:${evColor(e)}">
       ${e.kind?`<span class="tag">${esc(e.kind)}</span>`:""}
       <span class="name">${esc(e.name)}</span>
-      <span class="when">${when}</span>
+      <span class="when">${when}${e.time?" · "+timeRange(e):""}</span>
       ${e.note?`<span class="muted" style="font-size:13px">${esc(e.note)}</span>`:""}
       <div class="row">${tc.length?`<span>${dn}/${tc.length} tasks done</span>`:""}
         ${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open event page ↗</a>`:""}
         <button class="fbtn" data-evpick="${esc(e.id)}">Show tasks</button>
-        ${canWrite()?`<button class="del" data-evdel="${esc(e.id)}">Remove</button>`:""}</div>
+        ${canWrite()?`<select class="evcolor" id="evc-${esc(e.id)}" data-id="${esc(e.id)}" aria-label="Event color">${colorOptions(e.color)}</select><button class="del" data-evdel="${esc(e.id)}">Remove</button>`:""}</div>
     </div>`}).join("");
 }
 function renderLegend(){
   $("legend").innerHTML=OFFICES.map(o=>`<span><i class="dot" style="--c:var(${o.c})"></i>${o.name.replace("Office of the ","")}</span>`).join("")+
-    `<span style="font-weight:600">▌▌ = meeting</span>`;
+    `<span style="font-weight:600">▌▌ = meeting</span><span>○ To do · ◐ In progress · ✓ Done</span>`;
 }
 function visibleTasks(){return evFilter==="all"?tasks:tasks.filter(t=>(t.event||"general")===evFilter)}
 function chip(t){
   const ev=evById(t.event);
-  return `<div class="chip${t.kind==="meeting"?" meet":""}${t.status==="done"?" done":""}" style="--c:var(${off(t.office).c})" title="${esc(off(t.office).name)}${ev?" · "+esc(ev.name):""}">${esc(t.title)}</div>`;
+  const s=ST[t.status]?t.status:"todo";
+  return `<div class="chip ${s}${t.kind==="meeting"?" meet":""}" style="--c:var(${off(t.office).c})" title="${esc(ST[s])} · ${esc(off(t.office).name)}${ev?" · "+esc(ev.name):""}"><span class="sicon" aria-label="${ST[s]}">${ICON[s]}</span> ${esc(t.title)}</div>`;
 }
 function renderCalendar(){
   const first=new Date(viewY,viewM,1), last=new Date(viewY,viewM+1,0);
@@ -299,16 +319,18 @@ function renderCalendar(){
   for(let i=0;i<cells;i++){
     const d=new Date(start.getFullYear(),start.getMonth(),start.getDate()+i), k=iso(d);
     const out=d.getMonth()!==viewM, labels=dayLabels(k), items=(m[k]||[]).sort((a,b)=>(b.kind==="meeting")-(a.kind==="meeting"));
-    html+=`<div class="day${out?" out":""}${k===todayISO?" today":""}${labels.length&&!out?" event":""}"><span class="d">${d.getDate()}</span>`+
-      (out?"":labels.map(l=>`<span class="evlabel">${esc(l)}</span>`).join("")+items.map(chip).join(""))+`</div>`;
-    if(!out&&(labels.length||items.length))agenda+=`<div class="aday${labels.length?" event":""}"><div class="date">${fmt(k)}${k===todayISO?" · Today":""}</div>`+
-      labels.map(l=>`<span class="evlabel">${esc(l)}</span>`).join("")+items.map(chip).join("")+`</div>`;
+    const evStyle=labels.length?` style="--ec:${labels[0].color}"`:"";
+    const lab=labels.map(l=>`<span class="evlabel" style="--ec:${l.color}">${esc(l.text)}</span>`).join("");
+    html+=`<div class="day${out?" out":""}${k===todayISO?" today":""}${labels.length&&!out?" event":""}"${out?"":evStyle}><span class="d">${d.getDate()}</span>`+
+      (out?"":lab+items.map(chip).join(""))+`</div>`;
+    if(!out&&(labels.length||items.length))agenda+=`<div class="aday${labels.length?" event":""}"${evStyle}><div class="date">${fmt(k)}${k===todayISO?" · Today":""}</div>`+
+      lab+items.map(chip).join("")+`</div>`;
   }
   $("grid").innerHTML=html;
   $("agenda").innerHTML=agenda||`<div class="empty">Nothing scheduled this month.</div>`;
 }
 function renderFilters(){
-  const opts=[["open","Not done"],["late","Overdue"],["all","All"]];
+  const opts=[["all","All"],["open","Not done"],["late","Overdue"]];
   $("filters").innerHTML=opts.map(([k,l])=>`<button class="fbtn" data-f="${k}" aria-pressed="${filter===k}">${l}</button>`).join("");
   const ops=[["all","All events"],["general","General (org-wide)"],...[...events].sort((a,b)=>(a.start||"9").localeCompare(b.start||"9")).map(e=>[e.id,e.name])];
   $("evFilter").innerHTML=ops.map(([v,l])=>`<option value="${esc(v)}"${v===evFilter?" selected":""}>${esc(l)}</option>`).join("");
@@ -320,7 +342,7 @@ function renderOffices(){
   if(!loaded){$("offices").innerHTML=`<div class="empty">Loading tasks…</div>`;return}
   const w=canWrite(), all=visibleTasks();
   $("offices").innerHTML=OFFICES.map(o=>{
-    let list=all.filter(t=>t.office===o.k).sort((a,b)=>(a.due||"9").localeCompare(b.due||"9"));
+    let list=all.filter(t=>t.office===o.k).sort((a,b)=>((a.status==="done")-(b.status==="done"))||(a.due||"9").localeCompare(b.due||"9"));
     const total=list.length, done=list.filter(t=>t.status==="done").length;
     if(filter==="open")list=list.filter(t=>t.status!=="done");
     if(filter==="late")list=list.filter(late);
@@ -328,7 +350,7 @@ function renderOffices(){
       <div class="ohead"><h3>${o.name}</h3><span class="muted" style="font-size:13px">${done}/${total} done</span></div>
       <div class="bar"><i style="width:${total?Math.round(done/total*100):0}%"></i></div>
       <div>${list.map(t=>{const ev=evById(t.event);const s=ST[t.status]?t.status:"todo";return `<div class="task">
-        <button class="st ${s}" data-id="${esc(t.id)}" data-act="status" ${w?"":"disabled"} aria-label="Status: ${ST[s]}. Change">${ST[s]}</button>
+        <select class="st ${s}" id="st-${esc(t.id)}" data-id="${esc(t.id)}" ${w?"":"disabled"} aria-label="Status">${Object.keys(ST).map(k=>`<option value="${k}"${k===s?" selected":""}>${ICON[k]} ${ST[k]}</option>`).join("")}</select>
         <span class="ttitle${s==="done"?" done":""}">${t.kind==="meeting"?"📅 ":""}${esc(t.title)}<br><span class="evtag">${ev?esc(ev.name):"General"}</span></span>
         ${t.details?`<details class="det"><summary>How to do it</summary><ul>${String(t.details).split("\n").filter(Boolean).map(l=>`<li>${esc(l)}</li>`).join("")}</ul></details>`:""}
         <div class="meta"><span class="${late(t)?"late":""}">${t.due?(late(t)?"Overdue · ":"Due ")+fmt(t.due):"No date"}</span>
@@ -350,15 +372,23 @@ document.addEventListener("click",e=>{
   if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
   const f=e.target.closest("[data-f]"); if(f){filter=f.dataset.f;renderFilters();renderOffices();return}
   const p=e.target.closest("[data-evpick]"); if(p){evFilter=p.dataset.evpick;const ev=evById(evFilter);if(ev&&ev.start){const d=parse(ev.start);viewY=d.getFullYear();viewM=d.getMonth()}renderAll();$("offices").scrollIntoView({behavior:"smooth"});return}
-  const ed=e.target.closest("[data-evdel]"); if(ed&&canWrite()){const id=ed.dataset.evdel;events=events.filter(x=>x.id!==id);renderAll();api({action:"delete",sheet:"Events",id});return}
+  const ed=e.target.closest("[data-evdel]"); if(ed&&canWrite()){
+    if(ed.dataset.confirm!=="1"){ed.dataset.confirm="1";ed.textContent="Tap again to remove";ed.style.color="var(--bad)";setTimeout(()=>{if(ed.isConnected){ed.dataset.confirm="";ed.textContent="Remove";ed.style.color=""}},4000);return}
+    const id=ed.dataset.evdel;events=events.filter(x=>x.id!==id);renderAll();api({action:"delete",sheet:"Events",id});return}
   const b=e.target.closest("[data-act]"); if(!b||!canWrite())return;
   const t=tasks.find(x=>x.id===b.dataset.id); if(!t)return;
-  if(b.dataset.act==="status"){t.status=NEXT[t.status]||"doing";renderAll();api({action:"update",sheet:"Tasks",id:t.id,data:{status:t.status}})}
-  if(b.dataset.act==="del"){tasks=tasks.filter(x=>x!==t);renderAll();api({action:"delete",sheet:"Tasks",id:t.id})}
+  if(b.dataset.act==="del"){
+    if(b.dataset.confirm!=="1"){b.dataset.confirm="1";b.textContent="Tap again to remove";b.style.color="var(--bad)";setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent="Remove";b.style.color=""}},4000);return}
+    tasks=tasks.filter(x=>x!==t);renderAll();api({action:"delete",sheet:"Tasks",id:t.id})}
 });
 document.addEventListener("keydown",e=>{if(e.key==="Enter"&&e.target.id==="codeIn")$("unlockBtn").click()});
 document.addEventListener("change",e=>{
-  const i=e.target.closest("input.owner"); if(!i||!canWrite())return;
+  if(!canWrite())return;
+  const sel=e.target.closest("select.st");
+  if(sel){const t=tasks.find(x=>x.id===sel.dataset.id);if(!t||t.status===sel.value)return;t.status=sel.value;renderAll();api({action:"update",sheet:"Tasks",id:t.id,data:{status:t.status}});return}
+  const ec=e.target.closest("select.evcolor");
+  if(ec){const ev=evById(ec.dataset.id);if(!ev)return;ev.color=ec.value;renderAll();api({action:"update",sheet:"Events",id:ev.id,data:{color:ev.color}});return}
+  const i=e.target.closest("input.owner"); if(!i)return;
   const t=tasks.find(x=>x.id===i.dataset.id); const v=i.value.trim();
   if(!t||v===(t.owner||""))return;
   t.owner=v; api({action:"update",sheet:"Tasks",id:t.id,data:{owner:v}});
@@ -368,7 +398,7 @@ document.addEventListener("submit",e=>{
   if(e.target.id==="addEvent"){
     const name=$("ev-name").value.trim(); if(!name)return;
     const start=$("ev-start").value, end=$("ev-end").value||start;
-    const rec={id:"ev"+Date.now().toString(36),name,kind:$("ev-kind").value.trim(),start,end};
+    const rec={id:"ev"+Date.now().toString(36),name,kind:$("ev-kind").value.trim(),start,end,time:$("ev-time").value,endTime:$("ev-endtime").value,color:$("ev-color").value};
     events.push(rec); renderAll(); e.target.reset(); api({action:"add",sheet:"Events",data:rec}); return;
   }
   const fm=e.target.closest("form.add"); if(!fm)return;
@@ -391,6 +421,7 @@ async function unlock(){
 }
 function note(msg,kind){$("notice").textContent=msg;$("notice").hidden=!msg;$("notice").dataset.kind=kind||""}
 
+$("ev-color").innerHTML=colorOptions("red");
 renderLegend(); renderUnlock(); renderAll(); load();
 setInterval(()=>{if(!document.hidden&&!busy)load()},30000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!busy)load()});
