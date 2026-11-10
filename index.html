@@ -83,6 +83,11 @@ section{display:grid;gap:14px}
 .lpill:hover{border-color:var(--accent);color:var(--accent)}
 .lx{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px;padding:0 4px}
 .lmark{color:var(--accent);font-weight:700}
+.evedit{gap:6px}
+.evedit input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
+.eerow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
+.eerow>div{display:grid;gap:2px;min-width:0}
+.evedit .row{margin-top:4px}
 .chip .sicon{font-weight:700;text-decoration:none;display:inline-block}
 .chip.doing .sicon{color:var(--warn)}
 .chip.done .sicon{color:var(--ok)}
@@ -214,7 +219,7 @@ const OLD_COLORS={red:"coral",blue:"sky",green:"lime",orange:"gold",purple:"lave
 const evKey=k=>EV_COLORS[k]?k:(OLD_COLORS[k]||"sky");
 const evColor=e=>EV_COLORS[evKey(e&&e.color)][1];
 const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===evKey(sel)?" selected":""}>${n}</option>`).join("");
-let selDay=null;
+let selDay=null, editEv=null;
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
 function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
@@ -258,7 +263,7 @@ async function load(){
     events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime),links:parseLinks(e.links)}));
     loaded=true;
     const a=document.activeElement;
-    if(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.value){renderStats();return}
+    if(editEv||(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.value)){renderStats();return}
     renderAll();
     if($("notice").dataset.kind==="net")note("");
   }catch(e){loaded=true;renderAll();note("Couldn't reach the board's Google Sheet. Check your connection; it will retry automatically.","net")}
@@ -317,6 +322,22 @@ function renderEvents(){
     const when=e.start?(e.end&&e.end!==e.start?fmtShort(e.start)+" – "+fmtShort(e.end)+", "+e.end.slice(0,4):fmt(e.start)+", "+e.start.slice(0,4)):"Date to be decided";
     const tc=tasks.filter(t=>t.event===e.id), dn=tc.filter(t=>t.status==="done").length;
     const link=safeUrl(e.link);
+    if(canWrite()&&editEv===e.id){
+      const f=k=>`ee-${k}-${esc(e.id)}`;
+      return `<form class="ev evedit" data-id="${esc(e.id)}" style="--ec:${evColor(e)}">
+        <label class="muted" style="font-size:12px" for="${f("name")}">Name</label>
+        <input id="${f("name")}" type="text" value="${esc(e.name)}" required>
+        <label class="muted" style="font-size:12px" for="${f("kind")}">Type</label>
+        <input id="${f("kind")}" type="text" value="${esc(e.kind)}" placeholder="Meeting, Tournament…">
+        <div class="eerow"><div><label class="muted" style="font-size:12px" for="${f("start")}">Start date</label><input id="${f("start")}" type="date" value="${esc(e.start)}"></div>
+          <div><label class="muted" style="font-size:12px" for="${f("time")}">Start time</label><input id="${f("time")}" type="time" value="${esc(e.time)}"></div></div>
+        <div class="eerow"><div><label class="muted" style="font-size:12px" for="${f("end")}">End date</label><input id="${f("end")}" type="date" value="${esc(e.end)}"></div>
+          <div><label class="muted" style="font-size:12px" for="${f("endTime")}">End time</label><input id="${f("endTime")}" type="time" value="${esc(e.endTime)}"></div></div>
+        <label class="muted" style="font-size:12px" for="${f("note")}">Note</label>
+        <input id="${f("note")}" type="text" value="${esc(e.note)}" placeholder="Venue, reminders…">
+        <div class="row"><button class="btn">Save</button><button type="button" class="navbtn" data-evcancel="1">Cancel</button></div>
+      </form>`;
+    }
     return `<div class="ev${past?" past":""}" style="--ec:${evColor(e)}">
       ${e.kind?`<span class="tag">${esc(e.kind)}</span>`:""}
       <span class="name">${esc(e.name)}</span>
@@ -326,7 +347,7 @@ function renderEvents(){
       <div class="row">${tc.length?`<span>${dn}/${tc.length} tasks done</span>`:""}
         ${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open event page ↗</a>`:""}
         <button class="fbtn" data-evpick="${esc(e.id)}">Show tasks</button>
-        ${canWrite()?`<select class="evcolor" id="evc-${esc(e.id)}" data-id="${esc(e.id)}" aria-label="Event color">${colorOptions(e.color)}</select><button class="del" data-evdel="${esc(e.id)}">Remove</button>`:""}</div>
+        ${canWrite()?`<select class="evcolor" id="evc-${esc(e.id)}" data-id="${esc(e.id)}" aria-label="Event color">${colorOptions(e.color)}</select><button class="navbtn" data-evedit="${esc(e.id)}">Edit</button><button class="del" data-evdel="${esc(e.id)}">Remove</button>`:""}</div>
     </div>`}).join("");
 }
 function renderLegend(){
@@ -434,6 +455,8 @@ $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffice
 document.addEventListener("click",e=>{
   if(e.target.id==="unlockBtn"){unlock();return}
   if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
+  const eb=e.target.closest("[data-evedit]"); if(eb&&canWrite()){editEv=eb.dataset.evedit;renderEvents();const n=document.getElementById("ee-name-"+editEv);n&&n.focus();return}
+  if(e.target.closest("[data-evcancel]")){editEv=null;renderEvents();return}
   if(e.target.id==="dpClose"){selDay=null;renderCalendar();renderDayPanel();return}
   const lr=e.target.closest("[data-lrm]");
   if(lr&&canWrite()){
@@ -470,6 +493,16 @@ document.addEventListener("change",e=>{
 });
 document.addEventListener("submit",e=>{
   e.preventDefault(); if(!canWrite())return;
+  if(e.target.matches("form.evedit")){
+    const id=e.target.dataset.id, ev=evById(id); if(!ev)return;
+    const g=k=>$("ee-"+k+"-"+id).value.trim();
+    const name=g("name"); if(!name)return;
+    const start=g("start"), end=g("end")||start;
+    if(start&&end<start){note("The end date can't be before the start date.");return}
+    const data={name,kind:g("kind"),start,end,time:g("time"),endTime:g("endTime"),note:g("note")};
+    Object.assign(ev,data); editEv=null; note(""); renderAll();
+    api({action:"update",sheet:"Events",id,data}); return;
+  }
   if(e.target.matches("form.addlink")){
     const [sheet,id]=e.target.dataset.lk.split("|"), fid=sheet+"-"+id;
     const url=$("lk-u-"+fid).value.trim(), label=$("lk-l-"+fid).value;
