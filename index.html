@@ -189,6 +189,13 @@ const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&
 const pad=n=>String(n).padStart(2,"0");
 const iso=d=>d.getFullYear()+"-"+pad(d.getMonth()+1)+"-"+pad(d.getDate());
 const todayISO=iso(now);
+// Accepts 2026-11-13, 11/13/2026 or a full date string typed into the Sheet; returns 2026-11-13 or "".
+function normDate(s){
+  s=String(s||"").trim(); if(!s)return "";
+  if(/^\d{4}-\d{2}-\d{2}$/.test(s))return s;
+  const d=new Date(s.replace(/\s*\(.*\)$/,""));
+  return isNaN(d)?"":iso(d);
+}
 const parse=s=>{const [y,m,d]=s.split("-").map(Number);return new Date(y,m-1,d)};
 const fmt=s=>parse(s).toLocaleDateString("en-US",{month:"short",day:"numeric",weekday:"short"});
 const fmtShort=s=>parse(s).toLocaleDateString("en-US",{month:"short",day:"numeric"});
@@ -202,7 +209,9 @@ async function load(){
   try{
     const r=await fetch(API_URL,{cache:"no-store"}); const j=await r.json();
     if(busy)return;
-    tasks=j.tasks||[]; events=j.events||[]; loaded=true; renderAll();
+    tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due)}));
+    events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end)}));
+    loaded=true; renderAll();
     if($("notice").dataset.kind==="net")note("");
   }catch(e){loaded=true;renderAll();note("Couldn't reach the board's Google Sheet. Check your connection; it will retry automatically.","net")}
 }
