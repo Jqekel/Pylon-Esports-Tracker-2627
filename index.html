@@ -188,9 +188,17 @@ const OFFICES=[
 ];
 const ST={todo:"To do",doing:"In progress",done:"Done"};
 const ICON={todo:"○",doing:"◐",done:"✓"};
-const EV_COLORS={red:["Red","#c8102e"],blue:["Blue","#2b6fd6"],green:["Green","#2f8f55"],orange:["Orange","#d0661c"],purple:["Purple","#7a52c7"],teal:["Teal","#12898f"],pink:["Pink","#c2337f"],gold:["Gold","#b88a00"]};
-const evColor=e=>(EV_COLORS[e&&e.color]||EV_COLORS.red)[1];
-const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===(sel||"red")?" selected":""}>${n}</option>`).join("");
+// Event colors deliberately avoid the office hues (red, green, blue, orange, purple, teal, magenta).
+const EV_COLORS={
+  gold:["Gold","#d4a300"], lime:["Lime","#7cb518"], sky:["Sky blue","#1fa2e0"], navy:["Navy","#1d2b6b"],
+  brown:["Brown","#8a5a2b"], coral:["Coral","#ff7a6b"], lavender:["Lavender","#a98be0"], mint:["Mint","#3cc9a0"],
+  rose:["Rose","#f29bbf"], slate:["Slate gray","#6b7c8f"], charcoal:["Charcoal","#3a3a3a"], olive:["Olive","#8a8a2e"],
+  sand:["Sand","#d6b27c"], aqua:["Aqua","#5fd6e8"]
+};
+const OLD_COLORS={red:"coral",blue:"sky",green:"lime",orange:"gold",purple:"lavender",teal:"aqua",pink:"rose"};
+const evKey=k=>EV_COLORS[k]?k:(OLD_COLORS[k]||"sky");
+const evColor=e=>EV_COLORS[evKey(e&&e.color)][1];
+const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===evKey(sel)?" selected":""}>${n}</option>`).join("");
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
 function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
@@ -424,7 +432,7 @@ async function unlock(){
 }
 function note(msg,kind){$("notice").textContent=msg;$("notice").hidden=!msg;$("notice").dataset.kind=kind||""}
 
-$("ev-color").innerHTML=colorOptions("red");
+$("ev-color").innerHTML=colorOptions("sky");
 renderLegend(); renderUnlock(); renderAll(); load();
 setInterval(()=>{if(!document.hidden&&!busy)load()},30000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!busy)load()});
