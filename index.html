@@ -83,6 +83,16 @@ section{display:grid;gap:14px}
 .lpill:hover{border-color:var(--accent);color:var(--accent)}
 .lx{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px;padding:0 4px}
 .lmark{color:var(--accent);font-weight:700}
+.bar.big{height:10px;border-radius:5px}
+.eplist{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;font-size:13.5px}
+.eplist .sicon{font-weight:700}
+.eplist .doing .sicon{color:var(--warn)}
+.eplist .done .sicon{color:var(--ok)}
+.strike{text-decoration:line-through;color:var(--muted)}
+.actlist{list-style:none;margin:0;padding:0;background:var(--surface);border:1px solid var(--line);border-radius:10px}
+.actlist li{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;padding:8px 14px;border-top:1px solid var(--line);font-size:13.5px}
+.actlist li:first-child{border-top:0}
+.actlist li>span:first-child{min-width:0;overflow-wrap:anywhere}
 .evedit{gap:6px}
 .evedit input{font:inherit;font-size:13px;padding:5px 8px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);width:100%;min-width:0}
 .eerow{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
@@ -154,6 +164,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
   <section>
     <div class="sechead"><div><div class="eyebrow">Events</div><h2>What's coming up</h2></div></div>
     <div class="events" id="events"><div class="empty">Loading events…</div></div>
+    <div class="daypanel" id="evPanel" hidden></div>
     <form class="add" id="addEvent" hidden>
       <input type="text" id="ev-name" placeholder="New event name" aria-label="Event name" required>
       <input type="text" id="ev-kind" placeholder="Type (e.g. Tournament)" aria-label="Event type" style="flex:0 1 170px">
@@ -195,6 +206,11 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
     <p class="help">Anyone can view this board. Officers enter their own code (top right) to edit, and every change is signed with their name: pick a status from the dropdown (<b>To do</b>, <b>In progress</b>, <b>Done</b>), type a name to assign an owner, or add tasks at the bottom of each office.</p>
     <div class="offices" id="offices"></div>
   </section>
+
+  <section>
+    <div class="sechead"><div><div class="eyebrow">Activity</div><h2>Recent changes</h2></div></div>
+    <div id="activity"><div class="empty">Loading recent changes…</div></div>
+  </section>
 </div>
 
 <script>
@@ -223,7 +239,7 @@ const OLD_COLORS={red:"coral",blue:"sky",green:"lime",orange:"gold",purple:"lave
 const evKey=k=>EV_COLORS[k]?k:(OLD_COLORS[k]||"sky");
 const evColor=e=>EV_COLORS[evKey(e&&e.color)][1];
 const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===evKey(sel)?" selected":""}>${n}</option>`).join("");
-let selDay=null, editEv=null, editTask=null, officers=[];
+let selDay=null, editEv=null, editTask=null, officers=[], activity=[], selEv=null, actMore=false;
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
 function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
@@ -266,6 +282,7 @@ async function load(){
     tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due),links:parseLinks(t.links)}));
     events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime),links:parseLinks(e.links)}));
     officers=Array.isArray(j.officers)?j.officers.map(String):[];
+    activity=Array.isArray(j.activity)?j.activity:[];
     loaded=true;
     const a=document.activeElement;
     if(editEv||editTask||(a&&/^(INPUT|SELECT|TEXTAREA)$/.test(a.tagName)&&a.value)){renderStats();return}
@@ -351,6 +368,7 @@ function renderEvents(){
       ${(e.links||[]).length?`<div class="links">${linkPills(e,"Events",false)}</div>`:""}
       <div class="row">${tc.length?`<span>${dn}/${tc.length} tasks done</span>`:""}
         ${link?`<a href="${esc(link)}" target="_blank" rel="noopener">Open event page ↗</a>`:""}
+        <button class="fbtn" data-evprog="${esc(e.id)}"${selEv===e.id?' aria-pressed="true"':""}>Progress</button>
         <button class="fbtn" data-evpick="${esc(e.id)}">Show tasks</button>
         ${canWrite()?`<select class="evcolor" id="evc-${esc(e.id)}" data-id="${esc(e.id)}" aria-label="Event color">${colorOptions(e.color)}</select><button class="navbtn" data-evedit="${esc(e.id)}">Edit</button><button class="del" data-evdel="${esc(e.id)}">Remove</button>`:""}</div>
     </div>`}).join("");
@@ -470,7 +488,52 @@ function confirmTap(b,label){
   setTimeout(()=>{if(b.isConnected){b.dataset.confirm="";b.textContent=old;b.style.color=""}},4000);
   return false;
 }
-function renderAll(){renderStats();renderEvents();renderCalendar();renderFilters();renderOffices();renderDayPanel()}
+function relTime(s){
+  const m=String(s||"").match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2})/); if(!m)return String(s||"");
+  const d=new Date(+m[1],m[2]-1,+m[3],+m[4],+m[5]), mins=Math.round((Date.now()-d)/60000);
+  if(mins<1)return "just now"; if(mins<60)return mins+"m ago";
+  const h=Math.round(mins/60); if(h<24)return h+"h ago";
+  const dd=Math.round(h/24); return dd<7?dd+"d ago":fmtShort(iso(d));
+}
+function actText(a){
+  let ch={}; try{ch=JSON.parse(a.change||"{}")||{}}catch(e){}
+  const item=(a.sheet==="Events"?events:tasks).find(x=>x.id===a.id);
+  const N=`<b>${esc((item&&(item.title||item.name))||ch.title||ch.name||"an item")}</b>`, noun=a.sheet==="Events"?"event":"task";
+  if(a.action==="add")return `added ${noun} ${N}`;
+  if(a.action==="delete")return `removed ${noun} ${N}`;
+  if(ch.status)return `marked ${N} as ${esc(ST[ch.status]||ch.status)}`;
+  if("owner" in ch)return ch.owner?`assigned ${N} to ${esc(ch.owner)}`:`removed the owner of ${N}`;
+  if("links" in ch)return `updated links on ${N}`;
+  if(ch.color)return `changed the color of ${N}`;
+  return `edited ${N}`;
+}
+function renderActivity(){
+  if(!loaded)return;
+  const box=$("activity");
+  if(!activity.length){box.innerHTML=`<div class="empty">No changes yet. Edits officers make will show up here.</div>`;return}
+  const list=actMore?activity:activity.slice(0,8);
+  box.innerHTML=`<ul class="actlist">${list.map(a=>`<li><span><b>${esc(a.who)}</b> ${actText(a)}</span><span class="muted">${esc(relTime(a.time))}</span></li>`).join("")}</ul>`+
+    (activity.length>8?`<button class="fbtn" id="actMore" style="margin-top:8px">${actMore?"Show less":"Show more"}</button>`:"");
+}
+function renderEvPanel(){
+  const p=$("evPanel"), e=evById(selEv);
+  if(!e){selEv=null;p.hidden=true;p.innerHTML="";return}
+  const ts=tasks.filter(t=>t.event===e.id), done=ts.filter(t=>t.status==="done").length;
+  const pct=ts.length?Math.round(done/ts.length*100):0, lateN=ts.filter(late).length;
+  p.hidden=false;
+  p.innerHTML=`<div class="ohead"><h3>${esc(e.name)} · progress</h3><button class="navbtn" id="epClose">Close</button></div>
+    <div style="display:grid;gap:6px;--c:${evColor(e)}"><div class="bar big"><i style="width:${pct}%"></i></div>
+    <span class="muted" style="font-size:13px">${done} of ${ts.length} tasks done · ${pct}%${lateN?` · <span style="color:var(--bad);font-weight:600">${lateN} overdue</span>`:""}</span></div>`+
+    (ts.length?OFFICES.map(o=>{
+      const ot=ts.filter(t=>t.office===o.k).sort((a,b)=>((a.status==="done")-(b.status==="done"))||(a.due||"9").localeCompare(b.due||"9"));
+      if(!ot.length)return "";
+      const od=ot.filter(t=>t.status==="done").length;
+      return `<div class="dpitem" style="--c:var(${o.c})"><div class="ohead"><span class="dptag" style="color:var(${o.c})">${esc(o.name)}</span><span class="muted" style="font-size:12.5px">${od}/${ot.length} done</span></div>
+        <div class="bar"><i style="width:${Math.round(od/ot.length*100)}%"></i></div>
+        <ul class="eplist">${ot.map(t=>{const s=ST[t.status]?t.status:"todo";return `<li class="${s}"><span class="sicon">${ICON[s]}</span> <span class="${s==="done"?"strike":""}">${esc(t.title)}</span> <span class="muted">· ${t.owner?esc(t.owner):"No owner"}${t.due?" · "+(late(t)?`<span style="color:var(--bad)">overdue, ${fmtShort(t.due)}</span>`:"due "+fmtShort(t.due)):""}</span></li>`}).join("")}</ul></div>`;
+    }).join(""):`<div class="muted" style="font-size:14px">No tasks are linked to this event yet. When you add or edit a task, pick this event in its Event dropdown.</div>`);
+}
+function renderAll(){renderStats();renderEvents();renderEvPanel();renderCalendar();renderFilters();renderOffices();renderDayPanel();renderActivity()}
 
 $("prev").onclick=()=>{viewM--;if(viewM<0){viewM=11;viewY--}renderCalendar()};
 $("next").onclick=()=>{viewM++;if(viewM>11){viewM=0;viewY++}renderCalendar()};
@@ -479,6 +542,9 @@ $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffice
 document.addEventListener("click",e=>{
   if(e.target.id==="unlockBtn"){unlock();return}
   if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
+  const ep=e.target.closest("[data-evprog]"); if(ep){selEv=selEv===ep.dataset.evprog?null:ep.dataset.evprog;renderEvents();renderEvPanel();if(selEv)$("evPanel").scrollIntoView({behavior:"smooth",block:"nearest"});return}
+  if(e.target.id==="epClose"){selEv=null;renderEvents();renderEvPanel();return}
+  if(e.target.id==="actMore"){actMore=!actMore;renderActivity();return}
   const tb=e.target.closest("[data-tedit]"); if(tb&&canWrite()){editTask=tb.dataset.tedit;renderOffices();const n=document.getElementById("te-title-"+editTask);n&&n.focus();return}
   if(e.target.closest("[data-tcancel]")){editTask=null;renderOffices();return}
   const eb=e.target.closest("[data-evedit]"); if(eb&&canWrite()){editEv=eb.dataset.evedit;renderEvents();const n=document.getElementById("ee-name-"+editEv);n&&n.focus();return}
