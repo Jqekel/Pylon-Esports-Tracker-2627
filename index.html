@@ -83,6 +83,12 @@ section{display:grid;gap:14px}
 .lpill:hover{border-color:var(--accent);color:var(--accent)}
 .lx{border:0;background:none;color:var(--muted);cursor:pointer;font:inherit;font-size:12px;padding:0 4px}
 .lmark{color:var(--accent);font-weight:700}
+.lplus{font:inherit;font-size:12px;font-weight:500;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:2px 10px;cursor:pointer}
+.lplus:hover{color:var(--accent);border-color:var(--accent)}
+.addbtn{font:inherit;font-size:13px;font-weight:500;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:6px;padding:6px 10px;cursor:pointer;text-align:left}
+.addbtn:hover{color:var(--accent);border-color:var(--accent)}
+.donetoggle{font:inherit;font-size:12.5px;border:0;background:none;color:var(--ok);cursor:pointer;padding:0;text-align:left;justify-self:start;font-weight:500}
+.donetoggle:hover{text-decoration:underline}
 .bar.big{height:10px;border-radius:5px}
 .eplist{list-style:none;margin:6px 0 0;padding:0;display:grid;gap:4px;font-size:13.5px}
 .eplist .sicon{font-weight:700}
@@ -239,6 +245,7 @@ const OLD_COLORS={red:"coral",blue:"sky",green:"lime",orange:"gold",purple:"lave
 const evKey=k=>EV_COLORS[k]?k:(OLD_COLORS[k]||"sky");
 const evColor=e=>EV_COLORS[evKey(e&&e.color)][1];
 const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value="${k}"${k===evKey(sel)?" selected":""}>${n}</option>`).join("");
+let openAdd=null, openLink=null; const showDone=new Set();
 let selDay=null, editEv=null, editTask=null, officers=[], activity=[], selEv=null, actMore=false;
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
 let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
@@ -425,10 +432,12 @@ function renderOffices(){
     if(filter==="open")list=list.filter(t=>t.status!=="done");
     if(filter==="late")list=list.filter(late);
     if(filter==="mine")list=list.filter(t=>t.owner&&t.owner===who);
+    const doneN=list.filter(t=>t.status==="done").length;
+    const shown=showDone.has(o.k)?list:list.filter(t=>t.status!=="done");
     return `<div class="office" style="--c:var(${o.c})">
       <div class="ohead"><h3>${o.name}</h3><span class="muted" style="font-size:13px">${done}/${total} done</span></div>
       <div class="bar"><i style="width:${total?Math.round(done/total*100):0}%"></i></div>
-      <div>${list.map(t=>{if(w&&editTask===t.id)return taskEditForm(t);const ev=evById(t.event);const s=ST[t.status]?t.status:"todo";return `<div class="task${ev?" hasev":""}"${ev?` style="--ev:${evColor(ev)}"`:""}>
+      <div>${shown.map(t=>{if(w&&editTask===t.id)return taskEditForm(t);const ev=evById(t.event);const s=ST[t.status]?t.status:"todo";return `<div class="task${ev?" hasev":""}"${ev?` style="--ev:${evColor(ev)}"`:""}>
         <select class="st ${s}" id="st-${esc(t.id)}" data-id="${esc(t.id)}" ${w?"":"disabled"} aria-label="Status">${Object.keys(ST).map(k=>`<option value="${k}"${k===s?" selected":""}>${ICON[k]} ${ST[k]}</option>`).join("")}</select>
         <span class="ttitle${s==="done"?" done":""}">${t.kind==="meeting"?"📅 ":""}${esc(t.title)}<br><span class="evtag">${ev?esc(ev.name):"General"}</span></span>
         ${(t.links||[]).length?`<div class="links" style="grid-column:2">${linkPills(t,"Tasks",false)}</div>`:""}
@@ -437,8 +446,10 @@ function renderOffices(){
           ${w?ownerSelect(t):`<span>${t.owner?"Owner: "+esc(t.owner):"No owner"}</span>`}
           ${w?`<button class="del" data-tedit="${esc(t.id)}" style="text-decoration:underline">Edit</button><button class="del" data-id="${esc(t.id)}" data-act="del">Remove</button>`:""}
           ${t.updatedBy?`<span title="Last change">Edited by ${esc(t.updatedBy)}${t.updatedAt?" · "+esc(t.updatedAt.slice(5)):""}</span>`:""}</div>
-      </div>`}).join("")||`<div class="muted" style="font-size:13px">Nothing here.</div>`}</div>
-      ${w?`<form class="add" data-office="${o.k}"><input type="text" id="add-t-${o.k}" placeholder="New task" aria-label="New task" required><input type="date" id="add-d-${o.k}" aria-label="Due date" value="${todayISO}"><select id="add-e-${o.k}" aria-label="Event">${evOptions(evFilter)}</select><select id="add-k-${o.k}" aria-label="Type"><option value="task">Task</option><option value="meeting">Meeting</option></select><button>Add</button></form>`:""}
+      </div>`}).join("")||`<div class="muted" style="font-size:13px">${doneN?"All caught up.":"Nothing here."}</div>`}</div>
+      ${doneN?`<button class="donetoggle" data-showdone="${o.k}" aria-expanded="${showDone.has(o.k)}">${showDone.has(o.k)?"Hide done tasks":`✓ ${doneN} done · Show`}</button>`:""}
+      ${w&&openAdd!==o.k?`<button class="addbtn" data-openadd="${o.k}">+ Add task</button>`:""}
+      ${w&&openAdd===o.k?`<form class="add" data-office="${o.k}"><input type="text" id="add-t-${o.k}" placeholder="New task" aria-label="New task" required><input type="date" id="add-d-${o.k}" aria-label="Due date" value="${todayISO}"><select id="add-e-${o.k}" aria-label="Event">${evOptions(evFilter)}</select><select id="add-k-${o.k}" aria-label="Type"><option value="task">Task</option><option value="meeting">Meeting</option></select><button>Add</button><button type="button" class="navbtn" data-closeadd="1">Cancel</button></form>`:""}
     </div>`}).join("");
 }
 function ownerSelect(t){
@@ -467,8 +478,9 @@ function linkPills(item,kind,editable){
 }
 function linkBlock(kind,item){
   const w=canWrite(), pills=linkPills(item,kind,w), fid=kind+"-"+item.id;
-  return `<div class="links">${pills||`<span class="muted" style="font-size:12.5px">No links yet</span>`}</div>`+
-    (w?`<form class="add addlink" data-lk="${kind}|${esc(item.id)}"><select id="lk-l-${esc(fid)}" aria-label="Link type">${LINK_TYPES.map(x=>`<option>${x}</option>`).join("")}</select><input type="url" id="lk-u-${esc(fid)}" placeholder="https://docs.google.com/…" aria-label="Link address" required><button>Add link</button></form>`:"");
+  const key=kind+"|"+item.id, open=w&&openLink===key;
+  return `<div class="links">${pills||(w?"":`<span class="muted" style="font-size:12.5px">No links yet</span>`)}${w&&!open?`<button class="lplus" data-openlink="${esc(key)}">+ Link</button>`:""}</div>`+
+    (open?`<form class="add addlink" data-lk="${kind}|${esc(item.id)}"><select id="lk-l-${esc(fid)}" aria-label="Link type">${LINK_TYPES.map(x=>`<option>${x}</option>`).join("")}</select><input type="url" id="lk-u-${esc(fid)}" placeholder="https://docs.google.com/…" aria-label="Link address" required><button>Add link</button><button type="button" class="navbtn" data-closelink="1">Cancel</button></form>`:"");
 }
 function renderDayPanel(){
   const p=$("dayPanel"); $("dayHint").hidden=!!selDay;
@@ -542,6 +554,11 @@ $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffice
 document.addEventListener("click",e=>{
   if(e.target.id==="unlockBtn"){unlock();return}
   if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
+  const ol=e.target.closest("[data-openlink]"); if(ol){openLink=ol.dataset.openlink;renderDayPanel();const n=$("lk-u-"+openLink.replace("|","-"));n&&n.focus();return}
+  if(e.target.closest("[data-closelink]")){openLink=null;renderDayPanel();return}
+  const oa=e.target.closest("[data-openadd]"); if(oa){openAdd=oa.dataset.openadd;renderOffices();const n=$("add-t-"+openAdd);n&&n.focus();return}
+  if(e.target.closest("[data-closeadd]")){openAdd=null;renderOffices();return}
+  const sd=e.target.closest("[data-showdone]"); if(sd){const k=sd.dataset.showdone;showDone.has(k)?showDone.delete(k):showDone.add(k);renderOffices();return}
   const ep=e.target.closest("[data-evprog]"); if(ep){selEv=selEv===ep.dataset.evprog?null:ep.dataset.evprog;renderEvents();renderEvPanel();if(selEv)$("evPanel").scrollIntoView({behavior:"smooth",block:"nearest"});return}
   if(e.target.id==="epClose"){selEv=null;renderEvents();renderEvPanel();return}
   if(e.target.id==="actMore"){actMore=!actMore;renderActivity();return}
@@ -609,7 +626,7 @@ document.addEventListener("submit",e=>{
     const url=$("lk-u-"+fid).value.trim(), label=$("lk-l-"+fid).value;
     if(!safeUrl(url)){note("Links must start with https://");return}
     const item=(sheet==="Events"?events:tasks).find(x=>x.id===id); if(!item)return;
-    item.links=[...(item.links||[]),{label,url}]; note(""); renderAll();
+    item.links=[...(item.links||[]),{label,url}]; openLink=null; note(""); renderAll();
     api({action:"update",sheet,id,data:{links:JSON.stringify(item.links)}}); return;
   }
   if(e.target.id==="addEvent"){
