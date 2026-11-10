@@ -85,6 +85,14 @@ section{display:grid;gap:14px}
 .lmark{color:var(--accent);font-weight:700}
 .lplus{font:inherit;font-size:12px;font-weight:500;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:999px;padding:2px 10px;cursor:pointer}
 .lplus:hover{color:var(--accent);border-color:var(--accent)}
+.lockcard{display:none;background:var(--surface);border:1px solid var(--line);border-top:4px solid var(--accent);border-radius:10px;padding:20px;gap:10px;max-width:460px}
+body.locked .lockcard{display:grid}
+body.locked .wrap>section,body.locked #stats{display:none!important}
+.lockrow{display:flex;flex-wrap:wrap;gap:8px}
+.lockrow input{font:inherit;font-size:15px;padding:8px 10px;border:1px solid var(--line);border-radius:6px;background:var(--bg);color:var(--fg);flex:1 1 180px;min-width:0}
+.lockrow .btn{font-size:15px;padding:8px 16px}
+.lockmsg{margin:0;color:var(--bad);font-size:13.5px}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0)}
 .addbtn{font:inherit;font-size:13px;font-weight:500;border:1px dashed var(--line);background:none;color:var(--muted);border-radius:6px;padding:6px 10px;cursor:pointer;text-align:left}
 .addbtn:hover{color:var(--accent);border-color:var(--accent)}
 .donetoggle{font:inherit;font-size:12.5px;border:0;background:none;color:var(--ok);cursor:pointer;padding:0;text-align:left;justify-self:start;font-weight:500}
@@ -165,6 +173,16 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
     <p class="help">Every event, meeting and to-do for the organization in one place. #PlayThePylonWay</p>
     <div class="stats" id="stats"></div>
     <div class="notice" id="notice" hidden></div>
+    <form class="lockcard" id="lockCard" onsubmit="event.preventDefault()">
+      <h2>This board is private</h2>
+      <p class="help">Enter the code your president gave you. Officers can view and edit; members can view.</p>
+      <div class="lockrow">
+        <label for="codeIn" class="sr">Your code</label>
+        <input id="codeIn" type="password" placeholder="Your code" autocomplete="off">
+        <button type="button" class="btn" id="unlockBtn">Unlock</button>
+      </div>
+      <p class="lockmsg" id="lockMsg" hidden></p>
+    </form>
   </header>
 
   <section>
@@ -209,7 +227,7 @@ button:focus-visible,input:focus-visible,select:focus-visible,a:focus-visible{ou
         <span id="filters" class="filters"></span>
       </div>
     </div>
-    <p class="help">Anyone can view this board. Officers enter their own code (top right) to edit, and every change is signed with their name: pick a status from the dropdown (<b>To do</b>, <b>In progress</b>, <b>Done</b>), type a name to assign an owner, or add tasks at the bottom of each office.</p>
+    <p class="help">Officers' changes are signed with their name: pick a status from the dropdown (<b>To do</b>, <b>In progress</b>, <b>Done</b>), type a name to assign an owner, or add tasks at the bottom of each office.</p>
     <div class="offices" id="offices"></div>
   </section>
 
@@ -248,9 +266,11 @@ const colorOptions=sel=>Object.entries(EV_COLORS).map(([k,[n]])=>`<option value=
 let openAdd=null, openLink=null; const showDone=new Set();
 let selDay=null, editEv=null, editTask=null, officers=[], activity=[], selEv=null, actMore=false;
 let tasks=[], events=[], filter="all", evFilter="all", loaded=false, busy=0;
-let code="", who=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||""}catch(e){}
-function setCode(c,w){code=c;who=w;try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w)}else{localStorage.removeItem("pylonCode");localStorage.removeItem("pylonWho")}}catch(e){}}
-const canWrite=()=>!!code;
+let code="", who="", role=""; try{code=localStorage.getItem("pylonCode")||"";who=localStorage.getItem("pylonWho")||"";role=localStorage.getItem("pylonRole")||"edit"}catch(e){}
+function setCode(c,w,r){code=c;who=w;role=r||"";try{if(c){localStorage.setItem("pylonCode",c);localStorage.setItem("pylonWho",w);localStorage.setItem("pylonRole",role)}else{["pylonCode","pylonWho","pylonRole"].forEach(k=>localStorage.removeItem(k))}}catch(e){}}
+const canWrite=()=>!!code&&role==="edit";
+function clearBoard(){tasks=[];events=[];officers=[];activity=[];selDay=null;selEv=null;editEv=null;editTask=null;openAdd=null;openLink=null}
+function applyLock(){document.body.classList.toggle("locked",!code)}
 const now=new Date(); let viewY=now.getFullYear(), viewM=now.getMonth();
 const $=id=>document.getElementById(id);
 const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
@@ -283,8 +303,12 @@ const safeUrl=u=>/^https:\/\//i.test(u||"")?u:"";
 
 async function load(){
   if(!/^https:\/\//.test(API_URL)){loaded=true;renderAll();note("Setup needed: paste your Apps Script URL into API_URL in index.html.");return}
+  applyLock();
+  if(!code)return;
   try{
-    const r=await fetch(API_URL,{cache:"no-store"}); const j=await r.json();
+    const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({action:"read",code})}); const j=await r.json();
+    if(!j.ok&&j.error==="bad_code"){setCode("","","");clearBoard();applyLock();renderUnlock();renderAll();lockNote("That code no longer works. Ask your president for the current one.");return}
+    if(!j.ok)throw new Error(j.error||"read failed");
     if(busy)return;
     tasks=(j.tasks||[]).map(t=>({...t,due:normDate(t.due),links:parseLinks(t.links)}));
     events=(j.events||[]).map(e=>({...e,start:normDate(e.start),end:normDate(e.end),time:normTime(e.time),endTime:normTime(e.endTime),links:parseLinks(e.links)}));
@@ -303,7 +327,8 @@ async function api(body){
     const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({...body,code})});
     const j=await r.json();
     if(!j.ok){
-      if(j.error==="bad_code"){setCode("","");renderUnlock();renderAll();note("Your officer code no longer works. Ask your president for your code and unlock again.")}
+      if(j.error==="bad_code"){setCode("","","");clearBoard();applyLock();renderUnlock();renderAll();lockNote("Your code no longer works. Ask your president for the current one.")}
+      else if(j.error==="view_only")note("Your code can view the board but not change it.");
       else note("That change didn't save. Try again.");
     }
   }catch(e){note("That change didn't save. Check your connection and try again.")}
@@ -321,9 +346,9 @@ function dayLabels(k){
   return out;
 }
 function renderUnlock(){
-  $("unlock").innerHTML=canWrite()
-    ?`<span class="muted">Editing as <b style="color:var(--fg)">${esc(who||"officer")}</b></span><button class="navbtn" id="lockBtn">Lock</button>`
-    :`<label for="codeIn" class="muted">Officer?</label><input id="codeIn" type="password" placeholder="Your officer code" autocomplete="off"><button class="btn" id="unlockBtn">Unlock editing</button>`;
+  $("unlock").innerHTML=code
+    ?`<span class="muted">${canWrite()?"Editing":"Viewing"} as <b style="color:var(--fg)">${esc(who||"member")}</b></span><button class="navbtn" id="lockBtn">Lock</button>`
+    :"";
   $("addEvent").hidden=!canWrite();
 }
 function renderStats(){
@@ -553,7 +578,7 @@ $("todayBtn").onclick=()=>{viewY=now.getFullYear();viewM=now.getMonth();renderCa
 $("evFilter").onchange=e=>{evFilter=e.target.value;renderCalendar();renderOffices()};
 document.addEventListener("click",e=>{
   if(e.target.id==="unlockBtn"){unlock();return}
-  if(e.target.id==="lockBtn"){setCode("","");renderUnlock();renderAll();return}
+  if(e.target.id==="lockBtn"){setCode("","","");clearBoard();loaded=false;note("");applyLock();renderUnlock();renderAll();return}
   const ol=e.target.closest("[data-openlink]"); if(ol){openLink=ol.dataset.openlink;renderDayPanel();const n=$("lk-u-"+openLink.replace("|","-"));n&&n.focus();return}
   if(e.target.closest("[data-closelink]")){openLink=null;renderDayPanel();return}
   const oa=e.target.closest("[data-openadd]"); if(oa){openAdd=oa.dataset.openadd;renderOffices();const n=$("add-t-"+openAdd);n&&n.focus();return}
@@ -643,20 +668,22 @@ document.addEventListener("submit",e=>{
   tasks.push(rec); renderAll(); ti.value=""; api({action:"add",sheet:"Tasks",data:rec});
 });
 async function unlock(){
-  const btn=$("unlockBtn"), v=$("codeIn").value.trim(); if(!v)return;
-  btn.disabled=true; btn.textContent="Checking…";
+  const btn=$("unlockBtn"), v=$("codeIn").value.trim();
+  if(!v){lockNote("Enter your code first.");return}
+  btn.disabled=true; btn.textContent="Checking…"; lockNote("");
   try{
     const r=await fetch(API_URL,{method:"POST",body:JSON.stringify({action:"whoami",code:v})});
     const j=await r.json();
-    if(j.ok){setCode(v,j.who||"");note("");renderUnlock();renderAll();return}
-    note("That code isn't on the officer list. Check it with your president.");
-  }catch(x){note("Couldn't check your code. Check your connection and try again.")}
-  btn.disabled=false; btn.textContent="Unlock editing";
+    if(j.ok){setCode(v,j.who||"",j.canEdit?"edit":"view");$("codeIn").value="";loaded=false;applyLock();renderUnlock();renderAll();load();btn.disabled=false;btn.textContent="Unlock";return}
+    lockNote("That code isn't recognized. Check it with your president.");
+  }catch(x){lockNote("Couldn't check your code. Check your connection and try again.")}
+  btn.disabled=false; btn.textContent="Unlock";
 }
+function lockNote(msg){const n=$("lockMsg");n.textContent=msg;n.hidden=!msg}
 function note(msg,kind){$("notice").textContent=msg;$("notice").hidden=!msg;$("notice").dataset.kind=kind||""}
 
 $("ev-color").innerHTML=colorOptions("sky");
-renderLegend(); renderUnlock(); renderAll(); load();
+applyLock(); renderLegend(); renderUnlock(); renderAll(); load();
 setInterval(()=>{if(!document.hidden&&!busy)load()},30000);
 document.addEventListener("visibilitychange",()=>{if(!document.hidden&&!busy)load()});
 </script>
